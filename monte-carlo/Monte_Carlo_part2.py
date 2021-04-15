@@ -12,13 +12,20 @@ from plot_utils import plot_blackjack_values, plot_policy
 env = gym.make('Blackjack-v0')
 
 
-def generate_episode_from_limit_stochastic(bj_env):
+def generate_episode_from_Q(env: BlackjackEnv, Q, epsilon, action_count):
+    """
+    Generates an episode
+    @param env:
+    @param Q:
+    @param epsilon:
+    @param action_count
+    """
     episode = []
-    state = bj_env.reset()
+    state = env.reset()
     while True:
-        probs = [0.8, 0.2] if state[0] > 18 else [0.2, 0.8]
-        action = np.random.choice(np.arange(2), p=probs)
-        next_state, reward, done, info = bj_env.step(action)
+        action = np.random.choice(np.arange(action_count), p=get_probs(Q[state], epsilon, action_count)) \
+            if state in Q else env.action_space.sample()
+        next_state, reward, done, info = env.step(action)
         episode.append((state, action, reward))
         state = next_state
         if done:
@@ -26,45 +33,59 @@ def generate_episode_from_limit_stochastic(bj_env):
     return episode
 
 
-def print_episode(episode: tuple) -> None:
-    """
-    Prints a single episode so that i can understand the tuple contents...
-    """
-    for x in range(len(episode)):
-        print(
-            f'S{x}={episode[x][0]} (player score, dealer cards, ace?), A{x}={episode[x][1]} ({"HIT" if episode[x][1] == 0 else "STICK"}), R={episode[x][2]}')
+def get_probs(Q_s, epsilon, nA):
+    """ obtains the action probabilities corresponding to epsilon-greedy policy """
+    policy_s = np.ones(nA) * epsilon / nA
+    best_a = np.argmax(Q_s)
+    policy_s[best_a] = 1 - epsilon + (epsilon / nA)
+    return policy_s
 
 
-def mc_prediction_q(env: BlackjackEnv, num_episodes: int, generate_episode, gamma: float = 1.0):
-    # initialize empty dictionaries of arrays
-    returns_sum = defaultdict(lambda: np.zeros(env.action_space.n))
-    N = defaultdict(lambda: np.zeros(env.action_space.n))
-    Q = defaultdict(lambda: np.zeros(env.action_space.n))
+def update_Q(env, episode, Q, alpha, gamma):
+    """ updates the action-value function estimate using the most recent episode """
+    states, actions, rewards = zip(*episode)
+    # prepare for discounting
+    discounts = np.array([gamma ** i for i in range(len(rewards) + 1)])
+    for i, state in enumerate(states):
+        old_Q = Q[state][actions[i]]
+        Q[state][actions[i]] = old_Q + alpha * (sum(rewards[i:] * discounts[:-(1 + i)]) - old_Q)
+    return Q
+
+
+def mc_control(env: BlackjackEnv, num_episodes: int, alpha: float, gamma: float = 1.0, eps_start=1.0, eps_decay=.9999,
+               eps_min=0.05) -> tuple:
+    """
+    Every visit monte carlo control
+    @param env: Blackjack Environment from gym
+    @param num_episodes:
+    @param alpha:
+    @param gamma:
+    @param eps_start: Initialize Value for epsilon
+    @param eps_decay: Amount of decay per episode for epsilon current_epsilon = (initial_epsilon)^#episode
+    @param eps_min: Minimum number of epsilon, makes sure that the agent always has some type of exploration
+    """
+    action_count = env.action_space.n
+    # initialize empty dictionary of arrays, prevents KeyError, returns np.zeros(nA) instead
+    Q = defaultdict(lambda: np.zeros(action_count))
+    epsilon = eps_start
     # loop over episodes
     for i_episode in range(1, num_episodes + 1):
         # monitor progress
         if i_episode % 1000 == 0:
             print("\rEpisode {}/{}.".format(i_episode, num_episodes), end="")
             sys.stdout.flush()
-        ## TODO: complete the function
-        episode: tuple = generate_episode(env)
-        states = [x[0] for x in episode]
-        actions = [x[1] for x in episode]
-        rewards = [x[2] for x in episode]
-        discounted_rewards = [rewards[x] * gamma**x for x in range(len(rewards))]
-        for i, state in enumerate(states):
-            returns_sum[state][actions[i]] += sum(discounted_rewards)
-            N[state][actions[i]] += 1.0
-            Q[state][actions[i]] = returns_sum[state][actions[i]] / N[state][actions[i]]
-    return Q
+        # set the value of epsilon
+        epsilon = max(epsilon * eps_decay, eps_min)
+        # generate an episode by following epsilon-greedy policy
+        episode = generate_episode_from_Q(env, Q, epsilon, action_count)
+        # update the action-value function estimate using the episode
+        Q = update_Q(env, episode, Q, alpha, gamma)
+    # determine the policy corresponding to the final action-value function estimate
+    policy = dict((k, np.argmax(v)) for k, v in Q.items())
+    return policy, Q
 
 
-# obtain the action-value function
-Q = mc_prediction_q(env, 500000, generate_episode_from_limit_stochastic)
-
-# obtain the corresponding state-value function
-V_to_plot = dict((k, (k[0] > 18) * (np.dot([0.8, 0.2], v)) + (k[0] <= 18) * (np.dot([0.2, 0.8], v))) \
-                 for k, v in Q.items())
-
-# plot the state-value function
-plot_blackjack_values(V_to_plot)
+policy, Q = mc_control(env, 500000, 0.02)
+V = dict((k, np.max(v)) for k, v in Q.items())
+plot_blackjack_values(V)
+plot_policy(policy)
