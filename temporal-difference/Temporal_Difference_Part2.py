@@ -11,7 +11,7 @@ from plot_utils import plot_values
 env: CliffWalkingEnv = gym.make('CliffWalking-v0')
 
 
-def sarsa(env, num_episodes, alpha, gamma=1.0, eps_start=1.0, eps_decay=.9999, eps_min=0.05) -> tuple:
+def q_learning(env, num_episodes, alpha, gamma=1.0, eps_start=1.0, eps_decay=.9999, eps_min=0.05) -> tuple:
     # initialize action-value function (empty dictionary of arrays)
     Q = defaultdict(lambda: np.zeros(env.nA))
 
@@ -26,28 +26,23 @@ def sarsa(env, num_episodes, alpha, gamma=1.0, eps_start=1.0, eps_decay=.9999, e
         epsilon = 1 / i_episode
         # set the initial state
         state = env.reset()
-        action = choose_action_epsilon_greedy(Q, state, epsilon)
 
         # loop over the steps in the episode
         while True:
+            action = choose_action_epsilon_greedy(Q, state, epsilon)
             next_state, reward, done, info = env.step(action)
+            step_count += 1
+
+            # sarsa uses the discounted value of the next state action pair as alternative estimate for Q
+            # update the Q table now
+            current_estimate = Q[state][action]
+            greedy_estimate = Q[next_state][np.argmax(Q[next_state])] if next_state is not None else 0
+            new_estimate = current_estimate + alpha * (reward + gamma * greedy_estimate - current_estimate)
+            Q[state][action] = new_estimate
 
             if not done:
-                step_count += 1
-                next_action = choose_action_epsilon_greedy(Q, next_state, epsilon)
-                # sarsa uses the discounted value of the next state action pair as alternative estimate for Q
-                # update the Q table now
-                current_estimate = Q[state][action]
-                next_action_estimate = Q[next_state][next_action]
-                new_estimate = current_estimate + alpha * (reward + gamma * next_action_estimate - current_estimate)
-                Q[state][action] = new_estimate
-
                 state = next_state
-                action = next_action
             else:
-                current_estimate = Q[state][action]
-                new_estimate = current_estimate + alpha * (reward - current_estimate)
-                Q[state][action] = new_estimate
                 break
         step_count_storage.append(step_count)
     return Q
@@ -86,14 +81,14 @@ def get_probabilities(Q, state, epsilon) -> tuple:
 
 
 # obtain the estimated optimal policy and corresponding action-value function
-Q_sarsa = sarsa(env, 5000, .01)
+Q_sarsamax = q_learning(env, 5000, .01)
 
 # print the estimated optimal policy
-policy_sarsa = np.array([np.argmax(Q_sarsa[key]) if key in Q_sarsa else -1 for key in np.arange(48)]).reshape(4, 12)
-check_test.run_check('td_control_check', policy_sarsa)
+policy_sarsamax = np.array([np.argmax(Q_sarsamax[key]) if key in Q_sarsamax else -1 for key in np.arange(48)]).reshape(
+    (4, 12))
+check_test.run_check('td_control_check', policy_sarsamax)
 print("\nEstimated Optimal Policy (UP = 0, RIGHT = 1, DOWN = 2, LEFT = 3, N/A = -1):")
-print(policy_sarsa)
+print(policy_sarsamax)
 
 # plot the estimated optimal state-value function
-V_sarsa = ([np.max(Q_sarsa[key]) if key in Q_sarsa else 0 for key in np.arange(48)])
-plot_values(V_sarsa)
+plot_values([np.max(Q_sarsamax[key]) if key in Q_sarsamax else 0 for key in np.arange(48)])
