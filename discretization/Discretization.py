@@ -15,9 +15,7 @@ display.start()
 
 plt.ion()
 
-plt.ion()
-
-# Create an environment and set random seed
+# Create an environment and set random sed
 env = gym.make('MountainCar-v0')
 env.seed(505)
 

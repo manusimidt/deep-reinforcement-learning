@@ -51,6 +51,7 @@ def get_probs(Q_s, epsilon, nA):
     policy_s: [] = np.ones(nA) * epsilon / nA
     # look what is the best action according to the Q-Table
     best_a: int = np.argmax(Q_s)
+
     policy_s[best_a] = 1 - epsilon + (epsilon / nA)
     return policy_s
 
